@@ -1,0 +1,8 @@
+# 기지전쟁 플러그인 설정 파일
+
+# 사용될 팀 목록을 정의합니다.
+teams:
+  RED:
+  BLUE:
+  YELLOW:
+  GREEN:
