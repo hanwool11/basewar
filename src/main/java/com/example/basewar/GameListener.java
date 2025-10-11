@@ -287,4 +287,20 @@ public class GameListener implements Listener {
         // Remove protected blocks from the explosion list
         blockList.removeIf(block -> protectedLocations.contains(block.getLocation()));
     }
+
+    @EventHandler
+    public void onPlayerMove(org.bukkit.event.player.PlayerMoveEvent event) {
+        if (!gameManager.isGameInProgress()) return;
+        Player player = event.getPlayer();
+
+        // 관전 모드일 때 움직임 제한
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            // 플레이어가 블록을 이동했는지 확인 (시야만 움직이는 것은 허용)
+            if (event.getFrom().getBlockX() != event.getTo().getBlockX() ||
+                event.getFrom().getBlockY() != event.getTo().getBlockY() ||
+                event.getFrom().getBlockZ() != event.getTo().getBlockZ()) {
+                event.setCancelled(true);
+            }
+        }
+    }
 }

@@ -269,6 +269,9 @@ public class GameManager {
         player.setHealth(20.0);
         player.setFoodLevel(20);
         player.setGameMode(GameMode.SURVIVAL);
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            player.removePotionEffect(effect.getType());
+        }
     }
 
     public void addPlayerToTeam(Player player, Team team) {
@@ -506,7 +509,13 @@ public class GameManager {
                     this.cancel();
                     player.setGameMode(GameMode.SURVIVAL);
                     initializePlayer(player);
-                    player.teleport(beaconLocation.clone().add(0, 1, 0));
+                    // 텔레포트 후 짧은 지연을 주어 클라이언트 업데이트를 돕습니다.
+                    new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            player.teleport(beaconLocation.clone().add(0.5, 1, 0.5)); // 블록 중앙으로 텔레포트
+                        }
+                    }.runTaskLater(plugin, 1L);
                 }
             }
         }.runTaskTimer(plugin, 0L, 20L);
