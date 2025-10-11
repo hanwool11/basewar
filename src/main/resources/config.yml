@@ -6,3 +6,6 @@ teams:
   BLUE:
   YELLOW:
   GREEN:
+
+# 게임 시작 후 무적 시간 (초 단위)
+invincibility-duration: 900

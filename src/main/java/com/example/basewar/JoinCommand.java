@@ -3,9 +3,15 @@ package com.example.basewar;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
-public class JoinCommand implements CommandExecutor {
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class JoinCommand implements CommandExecutor, TabCompleter {
 
     private final GameManager gameManager;
 
@@ -34,5 +40,21 @@ public class JoinCommand implements CommandExecutor {
         }
 
         return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> completions = new ArrayList<>();
+        if (args.length == 1) {
+            List<String> teamNames = Arrays.stream(Team.values())
+                                         .map(team -> team.name().toLowerCase())
+                                         .collect(Collectors.toList());
+            for (String teamName : teamNames) {
+                if (teamName.toLowerCase().startsWith(args[0].toLowerCase())) {
+                    completions.add(teamName);
+                }
+            }
+        }
+        return completions;
     }
 }

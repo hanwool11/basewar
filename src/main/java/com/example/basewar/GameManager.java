@@ -2,10 +2,16 @@ package com.example.basewar;
 
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -17,14 +23,22 @@ public class GameManager {
 
     private final JavaPlugin plugin;
     private boolean gameInProgress = false;
+    private boolean isInvincible = false;
 
     private final Map<Team, Set<UUID>> teams = new HashMap<>();
     private final Map<Team, Boolean> beaconStatus = new HashMap<>();
+    private final Map<Team, Boolean> beaconEverPlaced = new HashMap<>();
     private final Map<Team, Location> beaconLocations = new HashMap<>();
     private final Map<UUID, Team> playerTeams = new HashMap<>();
+    private final Map<UUID, Boolean> teamChatStatus = new HashMap<>();
+    private final Map<UUID, BukkitTask> miningFatigueTasks = new HashMap<>();
     private final ScoreboardManager scoreboardManager;
     private Scoreboard mainScoreboard;
     private Location globalSpawnLocation;
+
+    private int invincibilityDuration = 10;
+    private BossBar invincibilityBossBar;
+    private BukkitTask invincibilityTask;
 
     public GameManager(JavaPlugin plugin) {
         this.plugin = plugin;
@@ -32,6 +46,7 @@ public class GameManager {
         for (Team team : Team.values()) {
             teams.put(team, new HashSet<>());
             beaconStatus.put(team, false);
+            beaconEverPlaced.put(team, false);
         }
 
         this.scoreboardManager = Bukkit.getScoreboardManager();
@@ -52,6 +67,8 @@ public class GameManager {
     private void loadConfigData() {
         plugin.saveDefaultConfig(); // 만약 config.yml이 없다면 생성
         plugin.reloadConfig(); // 최신 설정 불러오기
+
+        this.invincibilityDuration = plugin.getConfig().getInt("invincibility-duration", 10);
 
         ConfigurationSection teamsSection = plugin.getConfig().getConfigurationSection("teams");
         if (teamsSection == null) {
@@ -85,6 +102,16 @@ public class GameManager {
         plugin.saveConfig();
     }
 
+    public void setInvincibilityDuration(int duration) {
+        this.invincibilityDuration = duration;
+        plugin.getConfig().set("invincibility-duration", duration);
+        plugin.saveConfig();
+    }
+
+    public boolean isInvincible() {
+        return isInvincible;
+    }
+
     private Location getLocationFromConfig(ConfigurationSection section) {
         if (section == null) return null;
         World world = Bukkit.getWorld(section.getString("World", "world"));
@@ -106,11 +133,15 @@ public class GameManager {
             return;
         }
 
+        // 게임 시작 시 이전 보스바 정리
+        if (invincibilityBossBar != null) {
+            invincibilityBossBar.removeAll();
+        }
+
         final Location startPoint;
         if (globalSpawnLocation != null) {
             startPoint = globalSpawnLocation;
         } else {
-            // Bukkit.getWorlds().get(0)는 기본 월드를 의미합니다.
             startPoint = Bukkit.getWorlds().get(0).getSpawnLocation();
             Bukkit.broadcastMessage("§e[알림] §f게임 시작 스폰 지점이 설정되지 않아 기본 월드 스폰에서 시작합니다.");
         }
@@ -122,25 +153,76 @@ public class GameManager {
             public void run() {
                 if (countdown > 0) {
                     Bukkit.broadcastMessage("§a게임 시작까지 " + countdown + "초 전!");
+                    for (Player player : Bukkit.getOnlinePlayers()) {
+                        if (countdown > 1) {
+                            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1.0f, 1.0f);
+                        } else {
+                            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1.0f, 2.0f); // Higher pitch for the final '1'
+                        }
+                    }
                     countdown--;
                 } else {
+                    this.cancel();
                     gameInProgress = true;
+                    isInvincible = true;
 
-                    // 모든 플레이어를 시작 지점으로 텔레포트
-                    for (Set<UUID> teamMembers : teams.values()) {
-                        for (UUID playerUUID : teamMembers) {
-                            Player player = Bukkit.getPlayer(playerUUID);
-                            if (player != null) {
-                                player.teleport(startPoint);
-                                initializePlayer(player);
-                            }
+                    // 모든 플레이어를 시작 지점으로 텔레포트하고 보스바에 추가
+                    invincibilityBossBar = Bukkit.createBossBar("§a무적 시간", BarColor.GREEN, BarStyle.SEGMENTED_10);
+                    invincibilityBossBar.setVisible(true);
+
+                    for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                        Team playerTeam = getPlayerTeam(onlinePlayer);
+                        if (playerTeam != null) {
+                            onlinePlayer.teleport(startPoint);
+                            initializePlayer(onlinePlayer);
+                            invincibilityBossBar.addPlayer(onlinePlayer);
                         }
                     }
 
                     giveBeaconsToRandomPlayers();
-                    Bukkit.broadcastMessage("§a기지전쟁 시작! 신호기를 안전한 곳에 설치하고 적의 신호기를 파괴하세요!");
-                    cancel();
+                    Bukkit.broadcastMessage("§a기지전쟁 시작! " + invincibilityDuration + "초의 무적시간이 적용됩니다!");
+                    for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
+                        onlinePlayer.playSound(onlinePlayer.getLocation(), Sound.ENTITY_ENDER_DRAGON_GROWL, 1.0f, 1.0f);
+                    }
+
+                    // 무적 시간 타이머 시작
+                    startInvincibilityTimer();
                 }
+            }
+        }.runTaskTimer(plugin, 0L, 20L);
+    }
+
+    private void startInvincibilityTimer() {
+        invincibilityTask = new BukkitRunnable() {
+            private int timer = invincibilityDuration;
+
+            @Override
+            public void run() {
+                if (timer <= 0) {
+                    isInvincible = false;
+                    invincibilityBossBar.setVisible(false);
+                    invincibilityBossBar.removeAll();
+                    Bukkit.getOnlinePlayers().forEach(p -> p.playSound(p.getLocation(), Sound.ENTITY_BLAZE_DEATH, 1.0f, 1.0f));
+                    Bukkit.broadcastMessage("§c무적 시간이 종료되었습니다! 전투를 시작하세요!");
+                    this.cancel();
+                    return;
+                }
+
+                double progress = (double) timer / invincibilityDuration;
+                invincibilityBossBar.setProgress(progress);
+
+                int minutes = timer / 60;
+                int seconds = timer % 60;
+                String timeString = String.format("%d분 %d초", minutes, seconds);
+                invincibilityBossBar.setTitle("§a무적 시간: §e" + timeString);
+
+                if (progress <= 0.3) {
+                    invincibilityBossBar.setColor(BarColor.RED);
+                } else if (progress <= 0.6) {
+                    invincibilityBossBar.setColor(BarColor.YELLOW);
+                }
+
+                timer--;
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
@@ -190,11 +272,51 @@ public class GameManager {
     }
 
     public void addPlayerToTeam(Player player, Team team) {
-        if (gameInProgress && playerTeams.containsKey(player.getUniqueId())) {
+        // 플레이어가 속해 있을 수 있는 모든 스코어보드 팀에서 명시적으로 제거
+        org.bukkit.scoreboard.Team playerSbTeam = mainScoreboard.getEntryTeam(player.getName());
+        if (playerSbTeam != null) {
+            playerSbTeam.removeEntry(player.getName());
+        }
+
+        Team currentTeam = playerTeams.get(player.getUniqueId());
+
+        // 게임이 진행 중이 아니면 자유롭게 팀에 참여/변경 허용
+        if (!gameInProgress) {
+            removePlayerFromCurrentTeam(player);
+            teams.get(team).add(player.getUniqueId());
+            playerTeams.put(player.getUniqueId(), team);
+
+            org.bukkit.scoreboard.Team sbTeam = mainScoreboard.getTeam(team.name());
+            if (sbTeam != null) {
+                sbTeam.addEntry(player.getName());
+            }
+            player.setScoreboard(mainScoreboard);
+            player.setDisplayName(team.getChatColor() + player.getName() + ChatColor.RESET);
+            player.setPlayerListName(team.getChatColor() + player.getName() + ChatColor.RESET);
+            player.sendMessage(team.getChatColor() + team.getDisplayName() + " 팀" + team.getChatColor() + "에 참여했습니다.");
+            return;
+        }
+
+        // 게임 진행 중인 경우:
+        // 재접속 처리: 게임 진행 여부와 관계없이, 플레이어가 이미 팀에 속해있다면 스코어보드만 업데이트
+        if (currentTeam == team) {
+            org.bukkit.scoreboard.Team sbTeam = mainScoreboard.getTeam(team.name());
+            if (sbTeam != null) {
+                sbTeam.addEntry(player.getName());
+            }
+            player.setScoreboard(mainScoreboard);
+            player.setDisplayName(team.getChatColor() + player.getName() + ChatColor.RESET);
+            player.setPlayerListName(team.getChatColor() + player.getName() + ChatColor.RESET);
+            return;
+        }
+
+        // 게임 중에 다른 팀으로 변경하려는 경우
+        if (currentTeam != null) {
             player.sendMessage("§c게임 중에는 팀을 변경할 수 없습니다.");
             return;
         }
 
+        // 게임 진행 중 처음 팀에 합류하는 경우
         removePlayerFromCurrentTeam(player);
         teams.get(team).add(player.getUniqueId());
         playerTeams.put(player.getUniqueId(), team);
@@ -204,8 +326,10 @@ public class GameManager {
             sbTeam.addEntry(player.getName());
         }
         player.setScoreboard(mainScoreboard);
+        player.setDisplayName(team.getChatColor() + player.getName() + ChatColor.RESET);
+        player.setPlayerListName(team.getChatColor() + player.getName() + ChatColor.RESET);
 
-        player.sendMessage(team.getChatColor() + team.getDisplayName() + " 팀§f에 참여했습니다.");
+        player.sendMessage(team.getChatColor() + team.getDisplayName() + " 팀" + team.getChatColor() + "에 참여했습니다.");
     }
 
     private void removePlayerFromCurrentTeam(Player player) {
@@ -218,6 +342,7 @@ public class GameManager {
             }
         }
         playerTeams.remove(player.getUniqueId());
+        teamChatStatus.remove(player.getUniqueId());
     }
 
     public void handleBeaconBreak(Block block, Player breaker) {
@@ -290,8 +415,18 @@ public class GameManager {
         }
 
         beaconStatus.put(placerTeam, true);
+        beaconEverPlaced.put(placerTeam, true);
         beaconLocations.put(placerTeam, block.getLocation());
         Bukkit.broadcastMessage(placerTeam.getChatColor() + placerTeam.getDisplayName() + " 팀§f이 신호기를 설치했습니다! 이제부터 리스폰이 가능합니다.");
+
+        // 팀원들에게 신호기 좌표 안내
+        String coordsMessage = placerTeam.getChatColor() + "[팀 알림] §f당신의 팀 신호기가 X:" + block.getX() + ", Y:" + block.getY() + ", Z:" + block.getZ() + " 에 설치되었습니다!";
+        for (UUID memberUUID : teams.get(placerTeam)) {
+            Player member = Bukkit.getPlayer(memberUUID);
+            if (member != null && member.isOnline() && !member.equals(placer)) {
+                member.sendMessage(coordsMessage);
+            }
+        }
 
         // 신호기 아래 철 블록 및 주변 유리 블록 설치
         Location beaconLoc = block.getLocation();
@@ -320,13 +455,61 @@ public class GameManager {
         Team team = getPlayerTeam(player);
         if (team == null) return;
 
-        if (beaconStatus.get(team)) {
-            player.sendMessage("신호기가 아직 살아있습니다. 잠시 후 리스폰됩니다.");
+        boolean hasBeacon = beaconStatus.get(team);
+        boolean wasBeaconEverPlaced = beaconEverPlaced.getOrDefault(team, false);
+
+        if (hasBeacon) {
+            // 비콘이 있으면 onPlayerRespawn 이벤트에서 지연 리스폰 처리
+            return;
         } else {
-            player.setGameMode(GameMode.SPECTATOR);
-            player.sendMessage("신호기가 파괴되어 최종적으로 사망했습니다. 관전 모드로 전환됩니다.");
-            checkForWinner();
+            if (wasBeaconEverPlaced) {
+                // 비콘이 있었는데 파괴되었으면 최종 사망
+                player.setGameMode(GameMode.SPECTATOR);
+                player.sendMessage("신호기가 파괴되어 최종적으로 사망했습니다. 관전 모드로 전환됩니다.");
+                checkForWinner();
+            } else {
+                // 비콘이 설치된 적 없으면 일반 리스폰
+                player.sendMessage("아직 팀의 신호기가 설치되지 않았습니다. 잠시 후 리스폰됩니다.");
+                player.setGameMode(GameMode.SURVIVAL); // Add this line
+                // onPlayerRespawn 이벤트에서 글로벌 스폰으로 이동시킴
+            }
         }
+    }
+
+    public void startRespawnCountdown(Player player) {
+        Team team = getPlayerTeam(player);
+        if (team == null) return;
+
+        Location beaconLocation = beaconLocations.get(team);
+        if (beaconLocation == null) { // 혹시 모를 예외 처리
+            player.sendMessage("§c리스폰 위치를 찾을 수 없어 즉시 리스폰합니다.");
+            initializePlayer(player);
+            if(globalSpawnLocation != null) player.teleport(globalSpawnLocation);
+            else player.teleport(player.getWorld().getSpawnLocation());
+            return;
+        }
+
+        player.setGameMode(GameMode.SPECTATOR);
+        player.teleport(player.getLocation().add(0, 2, 0)); // 살짝 위에서 보도록
+
+        int respawnTime = 5; // 5초 고정
+
+        new BukkitRunnable() {
+            int timer = respawnTime;
+
+            @Override
+            public void run() {
+                if (timer > 0) {
+                    player.sendTitle("§c사망!", "§e" + timer + "초 후 리스폰됩니다.", 0, 25, 5);
+                    timer--;
+                } else {
+                    this.cancel();
+                    player.setGameMode(GameMode.SURVIVAL);
+                    initializePlayer(player);
+                    player.teleport(beaconLocation.clone().add(0, 1, 0));
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 20L);
     }
 
     private void checkForWinner() {
@@ -348,23 +531,59 @@ public class GameManager {
 
     private void resetGame() {
         gameInProgress = false;
+        isInvincible = false;
+
+        // 무적 시간 타이머 및 보스바 정리
+        if (invincibilityTask != null && !invincibilityTask.isCancelled()) {
+            invincibilityTask.cancel();
+        }
+        if (invincibilityBossBar != null) {
+            invincibilityBossBar.setVisible(false);
+            invincibilityBossBar.removeAll();
+        }
+
         for (Player p : Bukkit.getOnlinePlayers()) {
             p.setGameMode(GameMode.SURVIVAL);
             p.setScoreboard(scoreboardManager.getMainScoreboard());
         }
 
         for (org.bukkit.scoreboard.Team sbTeam : mainScoreboard.getTeams()) {
-            for (String entry : sbTeam.getEntries()) {
-                sbTeam.removeEntry(entry);
+            sbTeam.unregister();
+        }
+
+        // 초기화 후 스코어보드 팀 다시 등록
+        for (Team teamEnum : Team.values()) {
+            org.bukkit.scoreboard.Team sbTeam = mainScoreboard.getTeam(teamEnum.name());
+            if (sbTeam == null) {
+                sbTeam = mainScoreboard.registerNewTeam(teamEnum.name());
             }
+            sbTeam.setPrefix(teamEnum.getChatColor() + "");
+            sbTeam.setColor(teamEnum.getChatColor());
+            sbTeam.setCanSeeFriendlyInvisibles(false);
+            sbTeam.setOption(org.bukkit.scoreboard.Team.Option.NAME_TAG_VISIBILITY, org.bukkit.scoreboard.Team.OptionStatus.ALWAYS);
         }
 
         teams.clear();
         playerTeams.clear();
         beaconLocations.clear();
+        beaconEverPlaced.clear();
+        teamChatStatus.clear();
+
+        // 채굴 피로 효과 정리
+        for (UUID playerUUID : miningFatigueTasks.keySet()) {
+            BukkitTask task = miningFatigueTasks.get(playerUUID);
+            task.cancel();
+            Player player = Bukkit.getPlayer(playerUUID);
+            if (player != null) {
+                player.removePotionEffect(PotionEffectType.MINING_FATIGUE);
+            }
+        }
+        miningFatigueTasks.clear();
+
         for (Team team : Team.values()) {
             teams.put(team, new HashSet<>());
             beaconStatus.put(team, false);
+            beaconEverPlaced.put(team, false);
         }
     }
 
@@ -382,5 +601,68 @@ public class GameManager {
 
     public Map<Team, Boolean> getBeaconStatus() {
         return beaconStatus;
+    }
+
+    public void toggleTeamChat(Player player) {
+        boolean currentStatus = teamChatStatus.getOrDefault(player.getUniqueId(), false);
+        teamChatStatus.put(player.getUniqueId(), !currentStatus);
+        if (!currentStatus) {
+            player.sendMessage("§a팀 채팅이 활성화되었습니다.");
+        } else {
+            player.sendMessage("§c팀 채팅이 비활성화되었습니다.");
+        }
+    }
+
+    public boolean isTeamChatEnabled(UUID playerUUID) {
+        return teamChatStatus.getOrDefault(playerUUID, false);
+    }
+
+    public Set<UUID> getTeamMembers(Team team) {
+        return teams.get(team);
+    }
+
+    public Location getGlobalSpawnLocation() {
+        return globalSpawnLocation;
+    }
+
+    public void startBeaconMining(Player player, Block beaconBlock) {
+        // 이미 작업이 실행중이면 중복 실행 방지
+        if (miningFatigueTasks.containsKey(player.getUniqueId())) {
+            return;
+        }
+
+        BukkitTask task = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!player.isOnline() || player.isDead()) {
+                    stopBeaconMining(player);
+                    return;
+                }
+
+                // 플레이어가 바라보는 블록이 대상 비콘이 아니면 중지
+                Block targetBlock = player.getTargetBlock(null, 5);
+                if (targetBlock == null || !targetBlock.equals(beaconBlock)) {
+                    stopBeaconMining(player);
+                    return;
+                }
+
+                // 채굴 피로 효과 적용 (1.3초, 2단계, 파티클 없음)
+                player.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, 26, 0, true, false));
+            }
+        }.runTaskTimer(plugin, 0L, 20L); // 1초마다 반복
+
+        miningFatigueTasks.put(player.getUniqueId(), task);
+    }
+
+    public void stopBeaconMining(Player player) {
+        if (miningFatigueTasks.containsKey(player.getUniqueId())) {
+            miningFatigueTasks.get(player.getUniqueId()).cancel();
+            miningFatigueTasks.remove(player.getUniqueId());
+        }
+        player.removePotionEffect(PotionEffectType.MINING_FATIGUE);
+    }
+
+    public BossBar getInvincibilityBossBar() {
+        return invincibilityBossBar;
     }
 }

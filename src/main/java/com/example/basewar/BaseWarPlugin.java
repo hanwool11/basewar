@@ -14,8 +14,12 @@ public class BaseWarPlugin extends JavaPlugin {
         this.gameManager = new GameManager(this);
 
         // Register Commands
-        this.getCommand("bw").setExecutor(new BwCommand(gameManager));
-        this.getCommand("join").setExecutor(new JoinCommand(gameManager));
+        BwCommand bwCommandExecutor = new BwCommand(gameManager);
+        this.getCommand("bw").setExecutor(bwCommandExecutor);
+        this.getCommand("bw").setTabCompleter(bwCommandExecutor);
+        JoinCommand joinCommandExecutor = new JoinCommand(gameManager);
+        this.getCommand("join").setExecutor(joinCommandExecutor);
+        this.getCommand("join").setTabCompleter(joinCommandExecutor);
 
         // Register Event Listeners
         getServer().getPluginManager().registerEvents(new GameListener(gameManager), this);
