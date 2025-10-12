@@ -16,10 +16,12 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
@@ -35,6 +37,17 @@ public class GameListener implements Listener {
 
     public GameListener(GameManager gameManager) {
         this.gameManager = gameManager;
+    }
+
+    @EventHandler
+    public void onInventoryClose(InventoryCloseEvent event) {
+        if (event.getView().getTitle().equals(GameManager.KIT_GUI_TITLE)) {
+            Player player = (Player) event.getPlayer();
+            if (player.hasPermission("basewar.admin")) {
+                gameManager.saveKit(event.getInventory());
+                player.sendMessage("§a기본 아이템 설정이 저장되었습니다.");
+            }
+        }
     }
 
     @EventHandler
@@ -135,6 +148,12 @@ public class GameListener implements Listener {
             return;
         }
 
+        // 무적 시간에는 비콘 손상 불가
+        if (gameManager.isInvincible()) {
+            event.setCancelled(true);
+            return;
+        }
+
         Player player = event.getPlayer();
         Team playerTeam = gameManager.getPlayerTeam(player);
         Team beaconTeam = null;
@@ -163,6 +182,12 @@ public class GameListener implements Listener {
 
         // 비콘을 파괴하면 채굴 피로 효과 즉시 중지
         if (block.getType() == Material.BEACON) {
+            if (gameManager.isInvincible()) {
+                player.sendMessage("§c무적 시간에는 신호기를 파괴할 수 없습니다.");
+                event.setCancelled(true);
+                return;
+            }
+
             gameManager.stopBeaconMining(player);
 
             // 성급함 버프 적용 (1.3초, 1단계, 파티클 없음)
@@ -224,16 +249,22 @@ public class GameListener implements Listener {
     }
 
     @EventHandler
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (!gameManager.isGameInProgress() || !(event.getEntity() instanceof Player)) {
+            return;
+        }
+
+        // 무적 시간에는 모든 데미지 방지
+        if (gameManager.isInvincible()) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
         if (!gameManager.isGameInProgress()) return;
 
-        if (gameManager.isInvincible()) {
-            if (event.getDamager() instanceof Player && event.getEntity() instanceof Player) {
-                event.setCancelled(true);
-                return;
-            }
-        }
-
+        // 무적 시간 체크는 onEntityDamage에서 처리하므로 여기서는 아군 공격만 확인
         Entity damager = event.getDamager();
         Entity victim = event.getEntity();
 

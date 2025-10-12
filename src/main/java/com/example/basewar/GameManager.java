@@ -7,6 +7,7 @@ import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
@@ -40,6 +41,9 @@ public class GameManager {
     private BossBar invincibilityBossBar;
     private BukkitTask invincibilityTask;
 
+    public static final String KIT_GUI_TITLE = "§x§0§0§8§0§f§f기본 아이템 설정";
+    private List<ItemStack> kitItems = new ArrayList<>();
+
     public GameManager(JavaPlugin plugin) {
         this.plugin = plugin;
         loadConfigData();
@@ -62,6 +66,7 @@ public class GameManager {
             sbTeam.setCanSeeFriendlyInvisibles(false);
             sbTeam.setOption(org.bukkit.scoreboard.Team.Option.NAME_TAG_VISIBILITY, org.bukkit.scoreboard.Team.OptionStatus.ALWAYS);
         }
+        loadKit();
     }
 
     private void loadConfigData() {
@@ -88,6 +93,35 @@ public class GameManager {
         ConfigurationSection spawnSection = plugin.getConfig().getConfigurationSection("global-spawn");
         if (spawnSection != null) {
             this.globalSpawnLocation = getLocationFromConfig(spawnSection);
+        }
+    }
+
+    public void openKitGui(Player player) {
+        Inventory kitGui = Bukkit.createInventory(null, 54, KIT_GUI_TITLE);
+        if (!kitItems.isEmpty()) {
+            kitGui.setContents(kitItems.toArray(new ItemStack[0]));
+        }
+        player.openInventory(kitGui);
+    }
+
+    public void saveKit(Inventory inventory) {
+        kitItems = Arrays.asList(inventory.getContents());
+        plugin.getConfig().set("kit", kitItems);
+        plugin.saveConfig();
+    }
+
+    @SuppressWarnings("unchecked")
+    public void loadKit() {
+        List<?> rawList = plugin.getConfig().getList("kit");
+        if (rawList != null) {
+            kitItems.clear();
+            for (Object obj : rawList) {
+                if (obj instanceof ItemStack) {
+                    kitItems.add((ItemStack) obj);
+                } else {
+                    plugin.getLogger().warning("config.yml의 kit 목록에 잘못된 아이템이 있습니다.");
+                }
+            }
         }
     }
 
@@ -175,6 +209,7 @@ public class GameManager {
                         if (playerTeam != null) {
                             onlinePlayer.teleport(startPoint);
                             initializePlayer(onlinePlayer);
+                            giveStartingKit(onlinePlayer);
                             invincibilityBossBar.addPlayer(onlinePlayer);
                         }
                     }
@@ -271,6 +306,15 @@ public class GameManager {
         player.setGameMode(GameMode.SURVIVAL);
         for (PotionEffect effect : player.getActivePotionEffects()) {
             player.removePotionEffect(effect.getType());
+        }
+    }
+
+    private void giveStartingKit(Player player) {
+        // 기본 아이템 지급
+        for (ItemStack item : kitItems) {
+            if (item != null) {
+                player.getInventory().addItem(item.clone());
+            }
         }
     }
 
@@ -530,10 +574,18 @@ public class GameManager {
 
         if (teamsWithRemainingPlayers.size() == 1) {
             Team winner = teamsWithRemainingPlayers.get(0);
-            Bukkit.broadcastMessage("§6§l" + winner.getDisplayName() + " 팀이 최종 승리했습니다!");
+            String title = winner.getChatColor() + winner.getDisplayName() + " 팀 승리";
+            String subtitle = "§7최종 승리 했습니다.";
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                p.sendTitle(title, subtitle, 10, 70, 20); // fadeIn, stay, fadeOut ticks
+                p.playSound(p.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+            }
             stopGame(false);
         } else if (teamsWithRemainingPlayers.isEmpty() && gameInProgress) {
             Bukkit.broadcastMessage("§c모든 팀이 탈락하여 무승부입니다!");
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                p.playSound(p.getLocation(), Sound.BLOCK_ANVIL_LAND, 1.0f, 1.0f);
+            }
             stopGame(false);
         }
     }

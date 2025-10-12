@@ -61,7 +61,7 @@ public class BwCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
             if (args.length < 2) {
-                sender.sendMessage("§e사용법: /bw config <setspawn|inv>");
+                sender.sendMessage("§e사용법: /bw config <setspawn|inv|kit>");
                 return true;
             }
 
@@ -96,7 +96,17 @@ public class BwCommand implements CommandExecutor, TabCompleter {
                 return true;
             }
 
-            sender.sendMessage("§e사용법: /bw config <setspawn|inv>");
+            if (args[1].equalsIgnoreCase("kit")) {
+                if (sender instanceof Player) {
+                    Player player = (Player) sender;
+                    gameManager.openKitGui(player);
+                } else {
+                    sender.sendMessage("§c이 명령어는 플레이어만 사용할 수 있습니다.");
+                }
+                return true;
+            }
+
+            sender.sendMessage("§e사용법: /bw config <setspawn|inv|kit>");
             return true;
         }
 
@@ -120,7 +130,7 @@ public class BwCommand implements CommandExecutor, TabCompleter {
                 }
             }
         } else if (args.length == 2 && args[0].equalsIgnoreCase("config")) {
-            List<String> configSubcommands = Arrays.asList("setspawn", "inv");
+            List<String> configSubcommands = Arrays.asList("setspawn", "inv", "kit");
             for (String sub : configSubcommands) {
                 if (sub.toLowerCase().startsWith(args[1].toLowerCase())) {
                     completions.add(sub);
