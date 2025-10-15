@@ -44,7 +44,7 @@ BaseWar는 팀 기반의 마인크래프트 PvP 플러그인입니다. 각 팀�
 *   **재접속 시 이름 색상 초기화 문제 해결**: 재접속 시 팀 색상이 적용되지 않던 문제가 해결되어 이름이 팀 색상으로 유지됩니다.
 
 ## 플러그인 다운로드
-* [릴리즈](https://github.com/agfeu0/basewar/releases/tag/basewar)
+* [릴리즈](https://github.com/agfeu0/basewar/releases)
 
 ## 마인크래프트 버전
 * 1.21.x (최신 버전과의 호환성은 테스트 필요)
