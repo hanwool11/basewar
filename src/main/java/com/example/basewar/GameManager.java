@@ -453,50 +453,62 @@ public class GameManager {
     }
 
     public void handleBeaconPlace(Block block, Player placer) {
-        Team placerTeam = getPlayerTeam(placer);
-        if (placerTeam == null) return;
+    Team placerTeam = getPlayerTeam(placer);
+    if (placerTeam == null) return;
 
-        if (beaconStatus.get(placerTeam)) {
-            placer.sendMessage("§c이미 당신의 팀 신호기가 설치되어 있습니다.");
-            return;
-        }
-
-        beaconStatus.put(placerTeam, true);
-        beaconEverPlaced.put(placerTeam, true);
-        beaconLocations.put(placerTeam, block.getLocation());
-        Bukkit.broadcastMessage(placerTeam.getChatColor() + placerTeam.getDisplayName() + " 팀§f이 신호기를 설치했습니다! 이제부터 리스폰이 가능합니다.");
-
-        // 팀원들에게 신호기 좌표 안내
-        String coordsMessage = placerTeam.getChatColor() + "[팀 알림] §f당신의 팀 신호기가 X:" + block.getX() + ", Y:" + block.getY() + ", Z:" + block.getZ() + " 에 설치되었습니다!";
-        for (UUID memberUUID : teams.get(placerTeam)) {
-            Player member = Bukkit.getPlayer(memberUUID);
-            if (member != null && member.isOnline() && !member.equals(placer)) {
-                member.sendMessage(coordsMessage);
-            }
-        }
-
-        // 신호기 아래 철 블록 및 주변 유리 블록 설치
-        Location beaconLoc = block.getLocation();
-        World world = beaconLoc.getWorld();
-        Material glassType = placerTeam.getStainedGlass();
-
-        // 철 블록 설치
-        int baseX = beaconLoc.getBlockX();
-        int baseY = beaconLoc.getBlockY() - 1;
-        int baseZ = beaconLoc.getBlockZ();
-        for (int x = -1; x <= 1; x++) {
-            for (int z = -1; z <= 1; z++) {
-                world.getBlockAt(baseX + x, baseY, baseZ + z).setType(Material.IRON_BLOCK);
-            }
-        }
-
-        // 팀 색깔 유리 블록 설치
-        beaconLoc.clone().add(0, 1, 0).getBlock().setType(glassType); // Top
-        beaconLoc.clone().add(1, 0, 0).getBlock().setType(glassType);  // East
-        beaconLoc.clone().add(-1, 0, 0).getBlock().setType(glassType); // West
-        beaconLoc.clone().add(0, 0, 1).getBlock().setType(glassType);  // South
-        beaconLoc.clone().add(0, 0, -1).getBlock().setType(glassType); // North
+    // 1. Y좌표 제한 검사 (61 ~ 99)
+    int y = block.getY();
+    if (y < 61 || y > 99) {
+        placer.sendMessage("§c신호기는 Y 61~99 사이에서만 설치할 수 있습니다!");
+        block.setType(Material.AIR); // 설치된 신호기 제거
+        return; // 아래 설치 로직 실행 안됨
     }
+
+    // 2. 이미 설치된 신호기 확인
+    if (beaconStatus.get(placerTeam)) {
+        placer.sendMessage("§c이미 당신의 팀 신호기가 설치되어 있습니다.");
+        block.setType(Material.AIR); // 혹시 모를 중복 설치 방지
+        return;
+    }
+
+    // 3. 정상 설치 처리
+    beaconStatus.put(placerTeam, true);
+    beaconEverPlaced.put(placerTeam, true);
+    beaconLocations.put(placerTeam, block.getLocation());
+    Bukkit.broadcastMessage(placerTeam.getChatColor() + placerTeam.getDisplayName() + " 팀§f이 신호기를 설치했습니다! 이제부터 리스폰이 가능합니다.");
+
+    // 팀원에게 좌표 알림
+    String coordsMessage = placerTeam.getChatColor() + "[팀 알림] §f당신의 팀 신호기가 X:" 
+            + block.getX() + ", Y:" + block.getY() + ", Z:" + block.getZ() + " 에 설치되었습니다!";
+    for (UUID memberUUID : teams.get(placerTeam)) {
+        Player member = Bukkit.getPlayer(memberUUID);
+        if (member != null && member.isOnline() && !member.equals(placer)) {
+            member.sendMessage(coordsMessage);
+        }
+    }
+
+    // 4. 신호기 주변 철 블록 및 유리 블록 설치
+    Location beaconLoc = block.getLocation();
+    World world = beaconLoc.getWorld();
+    Material glassType = placerTeam.getStainedGlass();
+
+    // 하단 3x3 철 블록 설치
+    int baseX = beaconLoc.getBlockX();
+    int baseY = beaconLoc.getBlockY() - 1;
+    int baseZ = beaconLoc.getBlockZ();
+    for (int x = -1; x <= 1; x++) {
+        for (int z = -1; z <= 1; z++) {
+            world.getBlockAt(baseX + x, baseY, baseZ + z).setType(Material.IRON_BLOCK);
+        }
+    }
+
+    // 상단 및 주변 유리 블록 설치
+    beaconLoc.clone().add(0, 1, 0).getBlock().setType(glassType); // Top
+    beaconLoc.clone().add(1, 0, 0).getBlock().setType(glassType);  // East
+    beaconLoc.clone().add(-1, 0, 0).getBlock().setType(glassType); // West
+    beaconLoc.clone().add(0, 0, 1).getBlock().setType(glassType);  // South
+    beaconLoc.clone().add(0, 0, -1).getBlock().setType(glassType); // North
+}
 
     public void handlePlayerDeath(Player player) {
         Team team = getPlayerTeam(player);
